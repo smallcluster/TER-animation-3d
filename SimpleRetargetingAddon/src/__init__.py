@@ -8,6 +8,9 @@ bl_info = {
 }
 
 import bpy
+import os
+import csv
+from bpy_extras.io_utils import ImportHelper 
 
 # Show a small popup window under the mouse
 def show_massage_box(message="", title="Message Box", icon="INFO"):
@@ -45,7 +48,6 @@ def update_constraint(self, context):
         c.owner_space = "LOCAL"
         c.mix_mode = "ADD"
 
-
 def auto_match_bones(self, context):
     sr_settings = context.scene.sr_settings
     for pair in sr_settings.bones_retarget_collection:
@@ -56,7 +58,6 @@ def auto_match_bones(self, context):
                 pair.value = bs.name
                 break
 
-        
 def updateBonesCollection(self, context):
 
     sr_settings = context.scene.sr_settings
@@ -141,6 +142,64 @@ class SRSettings(bpy.types.PropertyGroup):
 # Convention for blender operator:
 # CLASS_OT_your_name
 # bl_idname = "class.your_name"
+
+class SR_OT_export_setup(bpy.types.Operator, ImportHelper):
+    bl_idname = "sr.export_setup"
+    bl_label = "Export bones setup"
+    bl_description = "Save bones setup in a CSV file"
+
+    filter_glob : bpy.props.StringProperty(
+        default="*.csv",
+        options={"HIDDEN"}
+    )
+
+    def execute(self, context):
+        sr_settings = context.scene.sr_settings
+
+        with open(self.filepath, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+            # header
+            writer.writerow(['target bone', 'source bone', 'invert x', 'invert y', 'invert z'])
+
+            # values
+            for pair in sr_settings.bones_retarget_collection:
+                writer.writerow([pair.name, pair.value, pair.invert_x, pair.invert_y, pair.invert_z])
+
+        return {"FINISHED"}
+
+class SR_OT_import_setup(bpy.types.Operator, ImportHelper):
+    bl_idname = "sr.import_setup"
+    bl_label = "Import bones setup"
+    bl_description = "Import bones setup from a CSV file"
+
+    filter_glob : bpy.props.StringProperty(
+        default="*.csv",
+        options={"HIDDEN"}
+    )
+
+    def execute(self, context):
+        sr_settings = context.scene.sr_settings
+
+        with open(self.filepath, 'r', newline="") as csvfile:
+            reader = csv.DictReader(csvfile, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+            line = 0
+            for row in reader:
+                
+                # try to use the stored value
+                if row['target bone'] not in sr_settings.bones_retarget_collection or row['source bone'] not in sr_settings.source_armature.pose.bones:
+                    continue
+
+                bone = sr_settings.bones_retarget_collection.get(row['target bone'])
+                bone.value = row['source bone']
+                bone.invert_x = row['invert x'] == "True"
+                bone.invert_y = row['invert y'] == "True"
+                bone.invert_z = row['invert z'] == "True"
+
+                line += 1
+
+
+        return {"FINISHED"}
+
 class SR_OT_auto_match_bones(bpy.types.Operator):
     bl_idname = "sr.auto_match_bones"
     bl_label = "Auto match bones"
@@ -268,6 +327,13 @@ class SR_PT_armature_setup_panel(bpy.types.Panel):
         col.prop_search(scene.sr_settings, "target_armature", bpy.data, "objects", text="Target")
         col.separator()
 
+        if sr_settings.source_armature == None or sr_settings.target_armature == None:
+            return
+
+        row = layout.row()
+        row.operator("sr.import_setup")
+        row.operator("sr.export_setup")
+
 class SR_PT_bones_setup_panel(bpy.types.Panel):
     bl_idname = "SR_PT_bones_setup_panel" # should match the class name
     bl_label = "Bones setup"
@@ -282,6 +348,8 @@ class SR_PT_bones_setup_panel(bpy.types.Panel):
 
         if not sr_settings.source_armature or not sr_settings.target_armature:
             return
+
+        
 
         row = layout.row()
         row.operator("sr.auto_match_bones")
@@ -330,6 +398,8 @@ class SR_PT_bones_setup_panel(bpy.types.Panel):
 classes = (
     BoneNamePair,
     SRSettings,
+    SR_OT_export_setup,
+    SR_OT_import_setup,
     SR_OT_clear_selected,
     SR_OT_auto_match_bones,
     SR_OT_match_selected_bones,
