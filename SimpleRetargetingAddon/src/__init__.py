@@ -16,7 +16,37 @@ def show_massage_box(message="", title="Message Box", icon="INFO"):
     bpy.context.window_manager.popup_menu(draw, title=title, icon=icon)
 
 
-def match_bones(self, context):
+def update_constraint(self, context):
+    sr_settings = context.scene.sr_settings
+    constraints = sr_settings.target_armature.pose.bones[self.name].constraints
+    c_rot_name = "SR_copy_rot"
+
+    # remove constraints if previously set
+    if self.value == "":
+        if c_rot_name in constraints:
+            constraints.remove(constraints[c_rot_name])
+    # Add or update constraints
+    else:
+        # add
+        if c_rot_name not in constraints:
+            c = constraints.new("COPY_ROTATION")
+            c.name = c_rot_name
+        # update
+        else:
+            c = constraints[c_rot_name]
+
+        # settings
+        c.target = sr_settings.source_armature
+        c.subtarget = self.value
+        c.invert_x = self.invert_x
+        c.invert_y = self.invert_y
+        c.invert_z = self.invert_z
+        c.target_space = "LOCAL"
+        c.owner_space = "LOCAL"
+        c.mix_mode = "ADD"
+
+
+def auto_match_bones(self, context):
     sr_settings = context.scene.sr_settings
     for pair in sr_settings.bones_retarget_collection:
         # try to find the corresponding bone from source armature
@@ -30,7 +60,6 @@ def match_bones(self, context):
 def updateBonesCollection(self, context):
 
     sr_settings = context.scene.sr_settings
-
     # Clear list of bones
     sr_settings.bones_retarget_collection.clear()
 
@@ -60,9 +89,16 @@ def updateBonesCollection(self, context):
     for bt in sr_settings.target_armature.pose.bones:
         c = sr_settings.bones_retarget_collection.add()
         c.name = bt.name
-    
-    # Update bone setup list
-    match_bones(self, context)
+
+        # Get previous bone match through constraint
+        constraints = sr_settings.target_armature.pose.bones[bt.name].constraints
+        c_rot_name = "SR_copy_rot"
+        if c_rot_name in constraints:
+            constraint = constraints[c_rot_name]
+            c.value = constraint.subtarget
+            c.invert_x = constraint.invert_x
+            c.invert_y = constraint.invert_y
+            c.invert_z = constraint.invert_z
     
     return None
 
@@ -72,11 +108,11 @@ def updateBonesCollection(self, context):
 
 class BoneNamePair(bpy.types.PropertyGroup):
     name : bpy.props.StringProperty(name="Bone pair")
-    value : bpy.props.StringProperty(name="Bone pair", default="")
 
-    invert_x : bpy.props.BoolProperty(default=False)
-    invert_y : bpy.props.BoolProperty(default=False)
-    invert_z : bpy.props.BoolProperty(default=False)
+    value : bpy.props.StringProperty(name="Bone pair", default="", update=update_constraint)
+    invert_x : bpy.props.BoolProperty(default=False, update=update_constraint)
+    invert_y : bpy.props.BoolProperty(default=False, update=update_constraint)
+    invert_z : bpy.props.BoolProperty(default=False, update=update_constraint)
 
 class SRSettings(bpy.types.PropertyGroup):
     source_armature : bpy.props.PointerProperty(type=bpy.types.Object, update=updateBonesCollection)
@@ -105,49 +141,14 @@ class SRSettings(bpy.types.PropertyGroup):
 # Convention for blender operator:
 # CLASS_OT_your_name
 # bl_idname = "class.your_name"
-class SR_OT_retarget(bpy.types.Operator):
-    bl_idname = "sr.retarget"
-    bl_label = "Retarget"
-    bl_description = "Apply rotations constraints on specified bones"
-
-    def execute(self, context):
-        sr_settings = context.scene.sr_settings
-
-        for pair in sr_settings.bones_retarget_collection:
-
-            constraints = sr_settings.target_armature.pose.bones[pair.name].constraints
-            c_rot_name = "SR_copy_rot"
-
-            # remove constraints if previously set
-            if pair.value == "":
-                if c_rot_name in constraints:
-                    constraints.remove(constraints[c_rot_name])
-            # Add or update constraints
-            else:
-                if c_rot_name not in constraints: # add
-                    c = constraints.new("COPY_ROTATION")
-                    c.name = c_rot_name
-                else: # update
-                    c = constraints[c_rot_name]
-                c.target = sr_settings.source_armature
-                c.subtarget = pair.value
-                c.invert_x = pair.invert_x
-                c.invert_y = pair.invert_y
-                c.invert_z = pair.invert_z
-                c.target_space = "LOCAL"
-                c.owner_space = "LOCAL"
-                c.mix_mode = "ADD"
-        
-        return {"FINISHED"}
-
-class SR_OT_match_bones(bpy.types.Operator):
-    bl_idname = "sr.match_bones"
+class SR_OT_auto_match_bones(bpy.types.Operator):
+    bl_idname = "sr.auto_match_bones"
     bl_label = "Auto match bones"
     bl_description = "Try to match source and target bones"
 
     def execute(self, context):
         sr_settings = context.scene.sr_settings
-        match_bones(self, context)
+        auto_match_bones(self, context)
         return {"FINISHED"}
 
 class SR_OT_match_selected_bones(bpy.types.Operator):
@@ -163,37 +164,37 @@ class SR_OT_match_selected_bones(bpy.types.Operator):
             show_massage_box("Please select exactly 2 bones !", "Can't match bones", "ERROR")
             return {"CANCELLED"}
 
-        selected_bone = bpy.context.selected_pose_bones[1]
-        active_bone = bpy.context.object.data.bones.active
+        bone1 = bpy.context.selected_pose_bones[1]
+        bone2 = bpy.context.selected_pose_bones[0]
 
-        selected_object = selected_bone.id_data
-        active_object = active_bone.id_data
+        armature1 = bone1.id_data
+        armature2 = bone2.id_data
 
         # Object can't be the same
-        if selected_object.name == active_object.name:
+        if armature1.name == armature2.name:
             show_massage_box("Selected bones can't be from the same armature !", "Can't match bones", "ERROR")
             return {"CANCELLED"}
 
         #--- check if one is from the target armature and the other from the source armature ---
 
-        # selected object is target object
-        if selected_object.name == sr_settings.target_armature.name:
-            target_bone_name = selected_bone.name
+        # armature 1 is target armature
+        if armature1.name == sr_settings.target_armature.name:
+            target_bone_name = bone1.name
 
-            if active_object.name == sr_settings.source_armature.name:
-                source_bone_name = active_bone.name
+            if armature2.name == sr_settings.source_armature.name:
+                source_bone_name = bone2.name
             else:
-                show_massage_box("Active bone isn't from source armature !", "Can't match bones", "ERROR")
+                show_massage_box("Second bone isn't from source armature !", "Can't match bones", "ERROR")
                 return {"CANCELLED"}
 
-        # active object is target object
-        elif active_object.name == sr_settings.target_armature.name:
-            target_bone_name = active_bone.name
+        # armature 2 is target armature
+        elif armature2.name == sr_settings.target_armature.name:
+            target_bone_name = bone2.name
 
-            if selected_object.name == sr_settings.source_armature.name:
-                source_bone_name = selected_bone.name
+            if armature1.name == sr_settings.source_armature.name:
+                source_bone_name = bone1.name
             else:
-                show_massage_box("First selected bone isn't from source armature !", "Can't match bones", "ERROR")
+                show_massage_box("First bone isn't from source armature !", "Can't match bones", "ERROR")
                 return {"CANCELLED"}
 
         # None of selected bones are from the target armature
@@ -202,8 +203,10 @@ class SR_OT_match_selected_bones(bpy.types.Operator):
             return {"CANCELLED"}
 
         # we have a source and a target bone
-        sr_settings.bones_retarget_collection.get(target_bone_name).value = source_bone_name
+        pair = sr_settings.bones_retarget_collection.get(target_bone_name)
+        pair.value = source_bone_name
         sr_settings.search_name = target_bone_name
+
         
         return {"FINISHED"}
 
@@ -216,6 +219,32 @@ class SR_OT_clear_bones(bpy.types.Operator):
         sr_settings = context.scene.sr_settings
         for pair in sr_settings.bones_retarget_collection:
             pair.value = ""
+            pair.invert_x = False
+            pair.invert_y = False
+            pair.invert_z = False
+        return {"FINISHED"}
+
+class SR_OT_clear_selected(bpy.types.Operator):
+    bl_idname = "sr.clear_selected"
+    bl_label = "Clear selected"
+    bl_description = "Clear constraint from selected bones"
+
+    def execute(self, context):
+        sr_settings = context.scene.sr_settings
+        selected_bones = bpy.context.selected_pose_bones
+
+        for bone in selected_bones:
+            # bone is from the target armature
+            print(bone.id_data.name)
+            if bone.id_data.name == sr_settings.target_armature.name:
+                pair = sr_settings.bones_retarget_collection.get(bone.name)
+                print(pair.name)
+                pair.value = ""
+                pair.invert_x = False
+                pair.invert_y = False
+                pair.invert_z = False
+
+
         return {"FINISHED"}
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -239,12 +268,6 @@ class SR_PT_armature_setup_panel(bpy.types.Panel):
         col.prop_search(scene.sr_settings, "target_armature", bpy.data, "objects", text="Target")
         col.separator()
 
-        if not sr_settings.source_armature or not sr_settings.target_armature:
-            return
-
-        col.operator("sr.retarget")
-
-
 class SR_PT_bones_setup_panel(bpy.types.Panel):
     bl_idname = "SR_PT_bones_setup_panel" # should match the class name
     bl_label = "Bones setup"
@@ -260,11 +283,13 @@ class SR_PT_bones_setup_panel(bpy.types.Panel):
         if not sr_settings.source_armature or not sr_settings.target_armature:
             return
 
-        col = layout.column()
-        col.operator("sr.match_bones")
         row = layout.row()
+        row.operator("sr.auto_match_bones")
         row.operator("sr.match_selected_bones")
+        row = layout.row()
         row.operator("sr.clear_bones")
+        row.operator("sr.clear_selected")
+        
 
         col = layout.column()
         col.separator()
@@ -305,8 +330,8 @@ class SR_PT_bones_setup_panel(bpy.types.Panel):
 classes = (
     BoneNamePair,
     SRSettings,
-    SR_OT_retarget,
-    SR_OT_match_bones,
+    SR_OT_clear_selected,
+    SR_OT_auto_match_bones,
     SR_OT_match_selected_bones,
     SR_OT_clear_bones,
     SR_PT_armature_setup_panel,
