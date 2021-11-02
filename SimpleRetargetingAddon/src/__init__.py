@@ -145,7 +145,7 @@ class SRSettings(bpy.types.PropertyGroup):
 
 class SR_OT_export_setup(bpy.types.Operator, ImportHelper):
     bl_idname = "sr.export_setup"
-    bl_label = "Export bones setup"
+    bl_label = "Export preset"
     bl_description = "Save bones setup in a CSV file"
 
     filter_glob : bpy.props.StringProperty(
@@ -169,7 +169,7 @@ class SR_OT_export_setup(bpy.types.Operator, ImportHelper):
 
 class SR_OT_import_setup(bpy.types.Operator, ImportHelper):
     bl_idname = "sr.import_setup"
-    bl_label = "Import bones setup"
+    bl_label = "Import preset"
     bl_description = "Import bones setup from a CSV file"
 
     filter_glob : bpy.props.StringProperty(
@@ -184,7 +184,7 @@ class SR_OT_import_setup(bpy.types.Operator, ImportHelper):
             reader = csv.DictReader(csvfile, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
             line = 0
             for row in reader:
-                
+
                 # try to use the stored value
                 if row['target bone'] not in sr_settings.bones_retarget_collection or row['source bone'] not in sr_settings.source_armature.pose.bones:
                     continue
@@ -213,7 +213,7 @@ class SR_OT_auto_match_bones(bpy.types.Operator):
 class SR_OT_match_selected_bones(bpy.types.Operator):
     bl_idname = "sr.match_selected_bones"
     bl_label = "Match selected bones"
-    bl_description = "Match selected source bone to active target bone"
+    bl_description = "Match selected source bone and target bone"
 
     def execute(self, context):
         sr_settings = context.scene.sr_settings
@@ -286,7 +286,7 @@ class SR_OT_clear_bones(bpy.types.Operator):
 class SR_OT_clear_selected(bpy.types.Operator):
     bl_idname = "sr.clear_selected"
     bl_label = "Clear selected"
-    bl_description = "Clear constraint from selected bones"
+    bl_description = "Clear selected bones"
 
     def execute(self, context):
         sr_settings = context.scene.sr_settings
@@ -312,7 +312,7 @@ class SR_OT_clear_selected(bpy.types.Operator):
 
 class SR_PT_armature_setup_panel(bpy.types.Panel):
     bl_idname = "SR_PT_armature_setup_panel" # should match the class name
-    bl_label = "Armatures setup"
+    bl_label = "Main settings"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "SimpleRetargeting"
@@ -333,7 +333,7 @@ class SR_PT_armature_setup_panel(bpy.types.Panel):
         row = layout.row()
         row.operator("sr.import_setup")
         row.operator("sr.export_setup")
-
+        
 class SR_PT_bones_setup_panel(bpy.types.Panel):
     bl_idname = "SR_PT_bones_setup_panel" # should match the class name
     bl_label = "Bones setup"
