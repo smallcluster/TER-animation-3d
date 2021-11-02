@@ -2,7 +2,7 @@ bl_info = {
     "name": "SimpleRetargeting",
     "description": "Simple retargeting method which auto apply rotations constraints from one rig to an other",
     "author": "Pierre Jaffuer",
-    "version": (0, 0, 1),
+    "version": (0, 0, 2),
     "blender": (2, 90, 3),
     "category": "Animation"
 }
@@ -18,12 +18,59 @@ def show_massage_box(message="", title="Message Box", icon="INFO"):
         self.layout.label(text=message)
     bpy.context.window_manager.popup_menu(draw, title=title, icon=icon)
 
+def clear_all(self, context):
+    sr_settings = context.scene.sr_settings
+    sr_settings.root_bone_name = ""
+    for pair in sr_settings.bones_retarget_collection:
+        pair.value = ""
+        pair.invert_x = False
+        pair.invert_y = False
+        pair.invert_z = False
 
-def update_constraint(self, context):
+
+def update_root_name(self, context):
+
+    # remove the root constaint from the previous root bone
+    if self.prev_root_bone_name != "" and self.prev_root_bone_name != self.root_bone_name:
+        prev_constraints = self.target_armature.pose.bones[self.prev_root_bone_name].constraints
+        c_root_pos_name = "SR_root_copy_pos"
+        if c_root_pos_name in prev_constraints:
+            prev_constraints.remove(prev_constraints[c_root_pos_name])
+    # set previous root bone name to the current one
+    self.prev_root_bone_name = self.root_bone_name
+
+    # update root bone constraints
+    update_constraints(self.bones_retarget_collection.get(self.root_bone_name), context)
+    
+
+
+def update_constraints(self, context):
     sr_settings = context.scene.sr_settings
     constraints = sr_settings.target_armature.pose.bones[self.name].constraints
     c_rot_name = "SR_copy_rot"
 
+    # update root bone constraints
+    if sr_settings.root_bone_name == self.name:
+        c_root_pos_name = "SR_root_copy_pos"
+
+        # remove constraints if previously set
+        if self.value == "":
+            if c_root_pos_name in constraints:
+                constraints.remove(constraints[c_root_pos_name])
+        # Add or update constraints
+        else:
+            # add
+            if c_root_pos_name not in constraints:
+                c = constraints.new("COPY_LOCATION")
+                c.name = c_root_pos_name
+            # update
+            else:
+                c = constraints[c_root_pos_name]
+            # settings
+            c.target = sr_settings.source_armature
+            c.subtarget = self.value
+
+    # update non root constraints
     # remove constraints if previously set
     if self.value == "":
         if c_rot_name in constraints:
@@ -110,16 +157,19 @@ def updateBonesCollection(self, context):
 class BoneNamePair(bpy.types.PropertyGroup):
     name : bpy.props.StringProperty(name="Bone pair")
 
-    value : bpy.props.StringProperty(name="Bone pair", default="", update=update_constraint)
-    invert_x : bpy.props.BoolProperty(default=False, update=update_constraint)
-    invert_y : bpy.props.BoolProperty(default=False, update=update_constraint)
-    invert_z : bpy.props.BoolProperty(default=False, update=update_constraint)
+    value : bpy.props.StringProperty(name="Bone pair", default="", update=update_constraints)
+    invert_x : bpy.props.BoolProperty(default=False, update=update_constraints)
+    invert_y : bpy.props.BoolProperty(default=False, update=update_constraints)
+    invert_z : bpy.props.BoolProperty(default=False, update=update_constraints)
 
 class SRSettings(bpy.types.PropertyGroup):
     source_armature : bpy.props.PointerProperty(type=bpy.types.Object, update=updateBonesCollection)
     target_armature : bpy.props.PointerProperty(type=bpy.types.Object, update=updateBonesCollection)
 
     bones_retarget_collection : bpy.props.CollectionProperty(type=BoneNamePair)
+
+    prev_root_bone_name : bpy.props.StringProperty()
+    root_bone_name : bpy.props.StringProperty(update=update_root_name)
 
     search_name : bpy.props.StringProperty()
 
@@ -159,11 +209,12 @@ class SR_OT_export_setup(bpy.types.Operator, ImportHelper):
         with open(self.filepath, 'w', newline='') as csvfile:
             writer = csv.writer(csvfile, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
             # header
-            writer.writerow(['target bone', 'source bone', 'invert x', 'invert y', 'invert z'])
+            writer.writerow(['target bone', 'source bone', 'invert x', 'invert y', 'invert z', 'is root'])
 
             # values
             for pair in sr_settings.bones_retarget_collection:
-                writer.writerow([pair.name, pair.value, pair.invert_x, pair.invert_y, pair.invert_z])
+                if pair.value != "": # do not save useless bones
+                    writer.writerow([pair.name, pair.value, "1" if pair.invert_x else "", "1" if pair.invert_y else "", "1" if pair.invert_z else "", "1" if pair.name == sr_settings.root_bone_name else ""])
 
         return {"FINISHED"}
 
@@ -183,17 +234,23 @@ class SR_OT_import_setup(bpy.types.Operator, ImportHelper):
         with open(self.filepath, 'r', newline="") as csvfile:
             reader = csv.DictReader(csvfile, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
             line = 0
-            for row in reader:
 
+            # reset every thing
+            clear_all(self, context)
+
+            for row in reader:
                 # try to use the stored value
                 if row['target bone'] not in sr_settings.bones_retarget_collection or row['source bone'] not in sr_settings.source_armature.pose.bones:
                     continue
-
                 bone = sr_settings.bones_retarget_collection.get(row['target bone'])
                 bone.value = row['source bone']
-                bone.invert_x = row['invert x'] == "True"
-                bone.invert_y = row['invert y'] == "True"
-                bone.invert_z = row['invert z'] == "True"
+                bone.invert_x = row['invert x'] == "1"
+                bone.invert_y = row['invert y'] == "1"
+                bone.invert_z = row['invert z'] == "1"
+
+                # is it the root bone ?
+                if row['is root'] == "1":
+                    sr_settings.root_bone_name = bone.name
 
                 line += 1
 
@@ -275,12 +332,7 @@ class SR_OT_clear_bones(bpy.types.Operator):
     bl_description = "Clear all matched bones"
 
     def execute(self, context):
-        sr_settings = context.scene.sr_settings
-        for pair in sr_settings.bones_retarget_collection:
-            pair.value = ""
-            pair.invert_x = False
-            pair.invert_y = False
-            pair.invert_z = False
+        clear_all(self, context)
         return {"FINISHED"}
 
 class SR_OT_clear_selected(bpy.types.Operator):
@@ -297,7 +349,6 @@ class SR_OT_clear_selected(bpy.types.Operator):
             print(bone.id_data.name)
             if bone.id_data.name == sr_settings.target_armature.name:
                 pair = sr_settings.bones_retarget_collection.get(bone.name)
-                print(pair.name)
                 pair.value = ""
                 pair.invert_x = False
                 pair.invert_y = False
@@ -330,6 +381,10 @@ class SR_PT_armature_setup_panel(bpy.types.Panel):
         if sr_settings.source_armature == None or sr_settings.target_armature == None:
             return
 
+        col = layout.column()
+        col.prop_search(sr_settings, "root_bone_name", sr_settings.target_armature.pose, "bones", text="Target root")
+        col.separator()
+
         row = layout.row()
         row.operator("sr.import_setup")
         row.operator("sr.export_setup")
@@ -349,16 +404,12 @@ class SR_PT_bones_setup_panel(bpy.types.Panel):
         if not sr_settings.source_armature or not sr_settings.target_armature:
             return
 
-        
-
         row = layout.row()
         row.operator("sr.auto_match_bones")
         row.operator("sr.match_selected_bones")
         row = layout.row()
         row.operator("sr.clear_bones")
         row.operator("sr.clear_selected")
-        
-
         col = layout.column()
         col.separator()
         col.prop(sr_settings, "search_name", text="Search")
