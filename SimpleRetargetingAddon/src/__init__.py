@@ -315,7 +315,7 @@ class SR_OT_match_selected_bones(bpy.types.Operator):
 
         # None of selected bones are from the target armature
         else:
-            show_massage_box("No selected bones are from target armature !", "Can't match bones", "ERROR") 
+            show_massage_box("No selected bones are from the target armature !", "Can't match bones", "ERROR") 
             return {"CANCELLED"}
 
         # we have a source and a target bone
