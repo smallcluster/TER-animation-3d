@@ -1,5 +1,5 @@
 bl_info = {
-    "name": "SimpleRetargeting",
+    "name": "Simple Retargeting",
     "description": "Simple retargeting method which auto apply rotations constraints from one rig to an other",
     "author": "Pierre Jaffuer",
     "version": (0, 0, 2),
